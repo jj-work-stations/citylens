@@ -58,3 +58,7 @@ dist/
 data/mashhad.geojson
 data/esfahan.sql
 data/tehran.sql
+# Large data exports
+data/mashhad.geojson
+data/esfahan.sql
+data/tehran.sql
