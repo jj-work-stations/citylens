@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────
+#  Dynamic configuration — shared middlewares
+# ─────────────────────────────────────────────────────────────────────
+#  Defined once here and attached to any router with the `@file` suffix,
+#  e.g. from docker-compose labels:
+#
+#      traefik.http.routers.api.middlewares=rate-limit@file,in-flight@file
+#
+#  Order matters: middlewares run in the order they are listed.
+# ─────────────────────────────────────────────────────────────────────
+
+http:
+  middlewares:
+
+    # ── Per-client rate limiting (keyed on the real client IP) ───────
+    # nginx forwards X-Forwarded-For and is declared trusted in the
+    # static config, so this limits per browser, not per proxy.
+    # average = sustained requests/second, burst = short allowance.
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+
+    # ── Cap concurrent in-flight requests per client ─────────────────
+    in-flight:
+      inFlightReq:
+        amount: 200
+
+    # ── Reject oversized uploads and cap buffered bodies ─────────────
+    body-limit:
+      buffering:
+        maxRequestBodyBytes: 10485760   # 10 MiB hard limit
+        memRequestBodyBytes: 2097152    # 2 MiB before spilling to disk
+        maxResponseBodyBytes: 0         # 0 = unlimited
+        memResponseBodyBytes: 0
+
+    # ── Compress responses for the tiles backend ─────────────────────
+    # The FastAPI app already gzips its own responses, so this is applied
+    # to backends that do not (Traefik skips already-encoded responses).
+    compress:
+      compress: {}
+
+    # ── Retry transient failures on read-only backends ───────────────
+    # Only attach this to GET-like endpoints: Traefik retries the whole
+    # request, which can duplicate a POST/PUT side effect.
+    retry:
+      retry:
+        attempts: 3
+        initialInterval: 100ms
+
+    # ── Path prefix for the tile server ──────────────────────────────
+    strip-tiles:
+      stripPrefix:
+        prefixes:
+          - "/tiles"
+
+    # ── Security headers — intentionally NOT attached ────────────────
+    # nginx terminates TLS and already emits HSTS / X-Frame-Options /
+    # X-Content-Type-Options for every site on this host, so adding them
+    # here too would send duplicate headers. Enable this (and drop the
+    # matching add_header lines from the nginx server block) if Traefik
+    # ever moves in front of nginx and becomes the TLS edge.
+    #
+    # security-headers:
+    #   headers:
+    #     contentTypeNosniff: true
+    #     frameDeny: true
+    #     referrerPolicy: "strict-origin-when-cross-origin"
+    #     permissionsPolicy: "camera=(), microphone=(), geolocation=(self)"
+    #     stsSeconds: 31536000
+    #     stsIncludeSubdomains: true
+    #     forceSTSHeader: true
+    #     customResponseHeaders:
+    #       Server: ""
+    #       X-Powered-By: ""

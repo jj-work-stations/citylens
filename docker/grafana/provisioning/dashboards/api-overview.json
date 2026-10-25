@@ -1,0 +1,65 @@
+{
+  "title": "API Overview – RED Metrics",
+  "uid": "api-overview",
+  "tags": ["api", "tempo", "tracing"],
+  "refresh": "10s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "title": "Request Rate (req/s)",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 8 },
+      "targets": [{
+        "datasource": { "uid": "prometheus" },
+        "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"map-api\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "title": "Error Rate (%)",
+      "type": "timeseries",
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 8 },
+      "targets": [{
+        "datasource": { "uid": "prometheus" },
+        "expr": "100 * sum(rate(traces_spanmetrics_calls_total{service=\"map-api\", status_code=\"STATUS_CODE_ERROR\"}[1m])) by (span_name) / sum(rate(traces_spanmetrics_calls_total{service=\"map-api\"}[1m])) by (span_name)",
+        "legendFormat": "{{span_name}}"
+      }]
+    },
+    {
+      "title": "Latency P50 / P95 / P99",
+      "type": "timeseries",
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "datasource": { "uid": "prometheus" },
+          "expr": "histogram_quantile(0.50, sum(rate(traces_spanmetrics_latency_bucket{service=\"map-api\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": { "uid": "prometheus" },
+          "expr": "histogram_quantile(0.95, sum(rate(traces_spanmetrics_latency_bucket{service=\"map-api\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": { "uid": "prometheus" },
+          "expr": "histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{service=\"map-api\", span_kind=\"SPAN_KIND_SERVER\"}[1m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "title": "Trace Search",
+      "type": "traces",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 12 },
+      "datasource": { "uid": "tempo" },
+      "targets": [{
+        "datasource": { "uid": "tempo" },
+        "queryType": "traceql",
+        "query": "{resource.service.name=\"map-api\"} | select(span.http.method, span.http.status_code, span.http.route, duration)",
+        "tableType": "spans",
+        "limit": 100,
+        "spss": 10
+      }]
+    }
+  ]
+}

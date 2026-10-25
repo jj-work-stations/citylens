@@ -1,0 +1,157 @@
+# ─────────────────────────────────────────────────────────────────────
+#  Dynamic configuration — external microservices (placeholders)
+# ─────────────────────────────────────────────────────────────────────
+#  These are the 4 black-box providers the frontend talks to. They are
+#  exposed on the SAME gateway host as the API, under their own path
+#  prefix, and the prefix is stripped before the request is forwarded:
+#
+#      https://gateway.kashefteam.org/svc1/<...>  ->  service1:8001/<...>
+#
+#  They are routed here (file provider) instead of via Docker labels
+#  because they are not containers in this Compose project yet. Once a
+#  service runs as a container on the `map_net` network, prefer adding
+#  `traefik.enable=true` labels to it in docker-compose.yml and delete
+#  its block below — labels are environment-driven and discovered
+#  automatically.
+#
+#  The hostname below is intentionally literal: Traefik never expands
+#  ${VARS} in dynamic config. Keep it in sync with DOMAIN in .env.
+#
+#  NOTE: the backends are not running yet, so these routes answer 502
+#  until service1..service4 are reachable on the `map_net` network.
+# ─────────────────────────────────────────────────────────────────────
+
+http:
+
+  # ── Connection behaviour for these upstreams ─────────────────────
+  serversTransports:
+    external:
+      forwardingTimeouts:
+        dialTimeout: 10s
+        responseHeaderTimeout: 30s
+        idleConnTimeout: 90s
+      maxIdleConnsPerHost: 100
+
+  # ── Backends ─────────────────────────────────────────────────────
+  services:
+    svc1:
+      loadBalancer:
+        servers:
+          - url: "http://service1:8001"
+        serversTransport: external
+        passHostHeader: false
+    svc2:
+      loadBalancer:
+        servers:
+          - url: "http://service2:8002"
+        serversTransport: external
+        passHostHeader: false
+    svc3:
+      loadBalancer:
+        servers:
+          - url: "http://service3:8003"
+        serversTransport: external
+        passHostHeader: false
+    svc4:
+      loadBalancer:
+        servers:
+          - url: "http://service4:8004"
+        serversTransport: external
+        passHostHeader: false
+
+  # ── Circuit breakers ─────────────────────────────────────────────
+  #  Stop hammering a provider that is failing and give it time to
+  #  recover, instead of cascading the outage to the frontend.
+  #
+  #  The expression is Traefik's documented default. Keep the `&&`: an
+  #  expression built on ResponseCodeRatio() alone trips after a single
+  #  5xx and then never closes again, because the breaker's own 503
+  #  answers keep the ratio above the threshold.
+  middlewares:
+    cb-svc1:
+      circuitBreaker:
+        expression: "LatencyAtQuantileMS(50.0) > 100 && NetworkErrorRatio() > 0.30"
+        checkPeriod: 10s
+        fallbackDuration: 10s
+        recoveryDuration: 30s
+    cb-svc2:
+      circuitBreaker:
+        expression: "LatencyAtQuantileMS(50.0) > 100 && NetworkErrorRatio() > 0.30"
+        checkPeriod: 10s
+        fallbackDuration: 10s
+        recoveryDuration: 30s
+    cb-svc3:
+      circuitBreaker:
+        expression: "LatencyAtQuantileMS(50.0) > 100 && NetworkErrorRatio() > 0.30"
+        checkPeriod: 10s
+        fallbackDuration: 10s
+        recoveryDuration: 30s
+    cb-svc4:
+      circuitBreaker:
+        expression: "LatencyAtQuantileMS(50.0) > 100 && NetworkErrorRatio() > 0.30"
+        checkPeriod: 10s
+        fallbackDuration: 10s
+        recoveryDuration: 30s
+
+    strip-svc1:
+      stripPrefix:
+        prefixes:
+          - "/svc1"
+    strip-svc2:
+      stripPrefix:
+        prefixes:
+          - "/svc2"
+    strip-svc3:
+      stripPrefix:
+        prefixes:
+          - "/svc3"
+    strip-svc4:
+      stripPrefix:
+        prefixes:
+          - "/svc4"
+
+  # ── Routers ──────────────────────────────────────────────────────
+  routers:
+    svc1:
+      rule: "Host(`gateway.kashefteam.org`) && PathPrefix(`/svc1`)"
+      entryPoints:
+        - web
+      service: svc1@file
+      middlewares:
+        - rate-limit@file
+        - body-limit@file
+        - strip-svc1@file
+        - cb-svc1@file
+
+    svc2:
+      rule: "Host(`gateway.kashefteam.org`) && PathPrefix(`/svc2`)"
+      entryPoints:
+        - web
+      service: svc2@file
+      middlewares:
+        - rate-limit@file
+        - body-limit@file
+        - strip-svc2@file
+        - cb-svc2@file
+
+    svc3:
+      rule: "Host(`gateway.kashefteam.org`) && PathPrefix(`/svc3`)"
+      entryPoints:
+        - web
+      service: svc3@file
+      middlewares:
+        - rate-limit@file
+        - body-limit@file
+        - strip-svc3@file
+        - cb-svc3@file
+
+    svc4:
+      rule: "Host(`gateway.kashefteam.org`) && PathPrefix(`/svc4`)"
+      entryPoints:
+        - web
+      service: svc4@file
+      middlewares:
+        - rate-limit@file
+        - body-limit@file
+        - strip-svc4@file
+        - cb-svc4@file

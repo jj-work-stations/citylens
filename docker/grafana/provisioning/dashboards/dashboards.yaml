@@ -1,0 +1,14 @@
+# docker/grafana/provisioning/dashboards/dashboards.yaml
+
+apiVersion: 1
+
+providers:
+  - name: "API Monitoring"
+    orgId: 1
+    folder: "API"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards

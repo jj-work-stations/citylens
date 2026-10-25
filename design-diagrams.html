@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Gateway &mdash; design diagrams</title>
+<!--
+  Renders the mermaid diagrams from design.md in any browser.
+  Generated from design.md: the diagram sources below are copied verbatim,
+  so this file is a VIEWER, not a second source of truth.
+  Regenerate after editing design.md, or just view design.md on GitHub /
+  in VS Code with the "Markdown Preview Mermaid Support" extension.
+  Requires internet for the mermaid library (CDN, pinned to the version
+  the diagrams were validated against).
+-->
+<style>
+  :root { color-scheme: light; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; padding: 24px 32px 64px; background: #f6f7f9; color: #202124; }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p  { margin: 0 0 20px; color: #5f6368; font-size: 13px; }
+  section.card { background: #fff; border: 1px solid #dadce0; border-radius: 10px;
+                 padding: 16px 20px 24px; margin: 0 0 20px; overflow-x: auto;
+                 box-shadow: 0 1px 2px rgba(60,64,67,.08); }
+  section.card h2 { margin: 0 0 14px; font-size: 15px; font-weight: 600;
+                    color: #1a73e8; letter-spacing: .01em; }
+  .diagram { text-align: center; }
+  .diagram svg { max-width: 100%; height: auto; }
+  pre.err { color: #b00020; background: #fdecef; border: 1px solid #f5c2c7;
+            border-radius: 6px; padding: 12px; font-size: 12px;
+            white-space: pre-wrap; text-align: left; }
+</style>
+</head>
+<body>
+<header>
+  <h1>API Gateway &mdash; design diagrams</h1>
+  <p>Rendered from <code>design.md</code> (Traefik gateway behind nginx). Generated file &mdash; regenerate if <code>design.md</code> changes.</p>
+</header>
+<div id="out"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js"></script>
+<script>
+const DIAGRAMS = [
+  {
+    "title": "2. Architecture",
+    "src": "flowchart TB\n    subgraph clients[\"Clients\"]\n      FE[\"Frontend SPA<br/>(browser)\"]\n      OP[\"Operators / scripts\"]\n    end\n\n    subgraph host[\"Host machine (system services)\"]\n      NG[\"nginx (system service)<br/>:80 and :443<br/>TLS termination<br/>wildcard *.kashefteam.org<br/>security headers<br/>HTTP to HTTPS redirect\"]\n    end\n\n    subgraph net_map[\"docker network: map_net (bridge, 10.211.0.0/24)\"]\n      T[\"Traefik v3.4 \u2014 API gateway<br/>entrypoint web :80<br/>path routing + middlewares\"]\n\n      subgraph apps[\"Backends\"]\n        API[\"api (FastAPI)<br/>map_api:8000\"]\n        MTN[\"martin (tiles)<br/>map_martin:3000\"]\n        S1[\"service1:8001<br/>(placeholder)\"]\n        S2[\"service2:8002<br/>(placeholder)\"]\n        S3[\"service3:8003<br/>(placeholder)\"]\n        S4[\"service4:8004<br/>(placeholder)\"]\n      end\n\n      subgraph infra[\"Infrastructure\"]\n        PG[\"postgres\"]\n        RD[\"redis\"]\n        LK[\"loki\"]\n        TP[\"tempo\"]\n      end\n    end\n\n    subgraph net_sock[\"docker network: socket_net (internal, no egress)\"]\n      SP[\"docker-socket-proxy<br/>:2375 (read-only Docker API)\"]\n      DS[[\"/var/run/docker.sock<br/>(read-only mount)\"]]\n    end\n\n    subgraph net_mon[\"external monitoring stack\"]\n      PROM[\"prometheus :9090\"]\n    end\n    GR[\"Grafana<br/>grafana.kashefteam.org\"]\n    LE[\"Let's Encrypt / Certum<br/>(cert already issued)\"]\n\n    FE -->|\"https://gateway.kashefteam.org\"| NG\n    OP -->|\"ssh -L 8080 ...\"| T\n    NG -->|\"http://127.0.0.1:8090 (loopback only)\"| T\n    NG -.->|\"serves existing wildcard cert\"| LE\n\n    T --> API\n    T --> MTN\n    T --> S1\n    T --> S2\n    T --> S3\n    T --> S4\n\n    T -->|\"discover containers<br/>every 30s / on event\"| SP\n    SP --- DS\n\n    T -->|\"OTLP gRPC :4317\"| TP\n    API --> PG\n    API --> RD\n    API --> LK\n    API -->|\"OTLP\"| TP\n    MTN --> PG\n    PROM -->|\"scrape 127.0.0.1:8080/metrics\"| T\n    GR --> PROM\n    GR --> LK\n    GR --> TP\n\n    classDef edge fill:#e8f0fe,stroke:#1a73e8,stroke-width:2px\n    classDef gw fill:#fff4e5,stroke:#e8710a,stroke-width:2px\n    classDef ph fill:#f1f3f4,stroke:#9aa0a6,stroke-dasharray:4 3\n    class NG edge\n    class T gw\n    class S1,S2,S3,S4 ph\n"
+  },
+  {
+    "title": "3. How a request flows",
+    "src": "sequenceDiagram\n    autonumber\n    participant B as Browser (frontend)\n    participant N as nginx :443\n    participant T as Traefik (entrypoint web)\n    participant M as Middleware chain\n    participant A as Backend (api / martin / serviceN)\n\n    B->>N: GET /tiles/iran/10/20/30<br/>Host: gateway.kashefteam.org\n    Note over N: TLS terminates here (wildcard cert)<br/>adds HSTS, X-Frame-Options, nosniff\n    N->>T: GET /tiles/iran/10/20/30 (plain HTTP, loopback)<br/>Host: gateway.kashefteam.org<br/>X-Forwarded-For: real-client-ip<br/>X-Forwarded-Proto: https\n\n    Note over T: 1. nginx (10.211.0.1) is a trusted peer,<br/>so X-Forwarded-* are accepted, not discarded\n    Note over T: 2. Router match \u2014 highest priority rule wins<br/>tiles@docker = Host AND PathPrefix(/tiles)\n\n    T->>M: route through chain\n    Note over M: strip-tiles \u2192 rate-limit \u2192 compress \u2192 retry\n    M-->>T: path rewritten to /iran/10/20/30<br/>request allowed, response will be gzipped\n\n    T->>A: GET /iran/10/20/30<br/>X-Forwarded-For: real-client-ip, 10.211.0.1<br/>X-Forwarded-Proto: https<br/>X-Forwarded-Prefix: /tiles<br/>Traceparent: 00-\u2026-01\n\n    A-->>T: 200 + tile bytes\n    T-->>N: 200 (+ gzip if not already encoded)\n    N-->>B: 200 (TLS), with edge security headers\n"
+  },
+  {
+    "title": "5. How Traefik picks a router",
+    "src": "flowchart TD\n    A[\"Request arrives on entrypoint web :80\"] --> B{\"Does Host match a router rule?\"}\n    B -->|\"Host: gateway.kashefteam.org<br/>+ /api, /health, /docs\u2026\"| R1[\"api@docker<br/>\u2192 api:8000\"]\n    B -->|\"Host + /tiles\"| R2[\"tiles@docker<br/>\u2192 martin:3000\"]\n    B -->|\"Host + /svc1\"| R3[\"svc1@file<br/>\u2192 service1:8001\"]\n    B -->|\"Host + /svc2 / /svc3 / /svc4\"| R4[\"svc2..4@file\"]\n    B -->|\"no rule matches\"| E404[\"404 Not Found\"]\n\n    R1 --> C1[\"middlewares:<br/>rate-limit \u2192 in-flight \u2192 body-limit\"]\n    R2 --> C2[\"middlewares:<br/>strip-tiles \u2192 rate-limit \u2192 compress \u2192 retry\"]\n    R3 --> C3[\"middlewares:<br/>rate-limit \u2192 body-limit \u2192 strip-svc1 \u2192 cb-svc1\"]\n    R4 --> C4[\"middlewares: (same shape as svc1)\"]\n\n    C1 --> LB{\"Health check<br/>/health OK?\"}\n    C2 --> LB2{\"Health check<br/>/health OK?\"}\n    LB -->|yes| UP[\"forward to container on map_net\"]\n    LB -->|no| DOWN[\"502 / removed from load balancer\"]\n    LB2 -->|yes| UP2[\"forward to martin:3000\"]\n    LB2 -->|no| DOWN2[\"502\"]\n    C3 --> CB{\"Circuit breaker open?<br/>(median latency &gt; 100ms<br/>AND network error ratio &gt; 30%)\"}\n    CB -->|\"open\"| BRK[\"503 \u2014 shed load, let the provider recover\"]\n    CB -->|\"closed\"| FWD[\"forward to service1:8001\"]\n"
+  },
+  {
+    "title": "6. Configuration model \u2014 where to put what",
+    "src": "flowchart LR\n    subgraph static[\"STATIC \u2014 docker/traefik/traefik.yml (restart to change)\"]\n        S1E[\"entryPoints<br/>web :80, traefik :8080\"]\n        S2P[\"providers<br/>docker + file\"]\n        S3O[\"observability<br/>api, ping, metrics, tracing, logs\"]\n    end\n\n    subgraph dynamic[\"DYNAMIC \u2014 docker/traefik/dynamic/*.yml (hot reload, no restart)\"]\n        D1[\"middlewares.yml<br/>rate-limit, in-flight, body-limit,<br/>compress, retry, strip-tiles\"]\n        D2[\"external-services.yml<br/>services + routers + circuit breakers<br/>for service1..4\"]\n    end\n\n    subgraph labels[\"DOCKER LABELS \u2014 docker-compose.yml (env-driven, hot reload)\"]\n        L1[\"api router + service\"]\n        L2[\"tiles router + service\"]\n        L3[\"future containers: traefik.enable=true\"]\n    end\n\n    subgraph nginxcfg[\"EDGE \u2014 docker/traefik/nginx/\u2026conf\"]\n        N1[\"TLS, certs, security headers,<br/>redirect, proxy to 127.0.0.1:8090\"]\n    end\n"
+  },
+  {
+    "title": "7. Networks and security model",
+    "src": "flowchart TB\n    subgraph internet[\"Internet\"]\n      C[\"Any client\"]\n    end\n\n    subgraph hostns[\"Host network namespace\"]\n      N[\"nginx :443 / :80\"]\n      LOOP[\"127.0.0.1:8090 (Traefik web)<br/>127.0.0.1:8080 (Traefik api)\"]\n    end\n\n    subgraph mnet[\"map_net \u2014 10.211.0.0/24 (bridge)\"]\n      T[\"Traefik\"]\n      A1[\"api\"]\n      A2[\"martin\"]\n      A3[\"service1..4\"]\n    end\n\n    subgraph snet[\"socket_net (internal: true \u2014 no egress, no inbound)\"]\n      T2[\"Traefik\"]\n      SP[\"docker-socket-proxy\"]\n    end\n\n    DS[[\"/var/run/docker.sock (ro)\"]]\n\n    C -->|\"443 only\"| N\n    N -->|\"127.0.0.1:8090\"| LOOP\n    LOOP --> T\n    T --> A1\n    T --> A2\n    T --> A3\n    T2 --> SP\n    SP -->|\"read-only\"| DS\n\n    X[\"api / martin / service1..4<br/>cannot reach the Docker socket\"] -.->|\"blocked\"| DS\n"
+  },
+  {
+    "title": "9.1 Decide first",
+    "src": "flowchart TD\n    Q1{\"Is the service a container<br/>in this docker-compose.yml?\"}\n    Q1 -->|yes| A1[\"USE DOCKER LABELS (\u00a79.2)<br/>discovered automatically\"]\n    Q1 -->|no| Q2{\"Can Traefik reach it over<br/>the map_net network<br/>by hostname?\"}\n    Q2 -->|\"yes, e.g. another container<br/>on map_net\"| A2[\"FILE PROVIDER, url http://name:port (\u00a79.3)\"]\n    Q2 -->|\"no, it's an external URL /<br/>another host\"| Q3{\"Is it https with a valid cert?\"}\n    Q3 -->|yes| A3[\"FILE PROVIDER with https url<br/>(add rootCAs if self-signed)\"]\n    Q3 -->|no| A4[\"Keep it behind nginx, or<br/>terminate TLS in front of Traefik\"]\n\n    A1 --> P{\"Does the service serve from<br/>its own root path?\"}\n    A2 --> P\n    A3 --> P\n    A4 --> P\n    P -->|\"yes (serves /foo)\"| PS[\"stripPrefix /myservice (\u00a79.4)\"]\n    P -->|\"no, it expects the full path\"| PN[\"no stripPrefix \u2014 just forward\"]\n"
+  },
+  {
+    "title": "10. Observability",
+    "src": "flowchart LR\n    T[\"Traefik\"] -->|\"JSON access log\"| LOGS[\"docker logs map_traefik\"]\n    T -->|\"Prometheus /metrics\"| P[\"Prometheus :9090\"]\n    T -->|\"OTLP gRPC :4317\"| TP[\"Tempo\"]\n    API[\"api (FastAPI, OTEL)\"] -->|\"OTLP\"| TP\n    P --> G[\"Grafana\"]\n    TP --> G\n    LK[\"Loki\"] --> G\n    API -->|\"structured logs\"| LK\n    T -.->|\"Traceparent injected\"| API\n"
+  }
+];
+
+mermaid.initialize({ startOnLoad: false, securityLevel: 'loose', theme: 'default' });
+
+(async () => {
+  const out = document.getElementById('out');
+  for (let i = 0; i < DIAGRAMS.length; i++) {
+    const d = DIAGRAMS[i];
+    const card = document.createElement('section');
+    card.className = 'card';
+    const h = document.createElement('h2');
+    h.textContent = (i + 1) + '. ' + d.title;
+    const box = document.createElement('div');
+    box.className = 'diagram';
+    card.append(h, box);
+    out.append(card);
+    try {
+      const { svg } = await mermaid.render('mmd-' + i, d.src);
+      box.innerHTML = svg;
+    } catch (e) {
+      const pre = document.createElement('pre');
+      pre.className = 'err';
+      pre.textContent = 'Render failed: ' + ((e && e.message) || e);
+      box.append(pre);
+    }
+  }
+})();
+</script>
+</body>
+</html>

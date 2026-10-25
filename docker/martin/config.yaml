@@ -1,0 +1,38 @@
+# # docker/martin/config.yaml
+listen_addresses: '0.0.0.0:3000'
+
+postgres:
+  connection_string: ${DATABASE_URL}
+
+  # ✅ Bigger pool = more parallel tile queries
+  pool_size: 40
+  
+  # ✅ Longer timeout for complex tile queries
+  idle_timeout: 300
+  max_lifetime: 3600
+
+  # auto_publish:
+  #   from_schemas:
+  #     - public
+  #   to_schemas:
+  #     - public
+  #   to_tables:
+  #     - '*_population'
+  #     - 'location_history'
+
+# ✅ Register tile functions explicitly
+functions:
+  tile_location_history:
+    schema:   public
+    function: tile_location_history
+
+# ✅ Tile cache (stores rendered tiles in memory)
+cache:
+  size: 1024          # MB in memory
+  max_tile_size: 2   # MB — skip caching huge tiles
+
+worker_processes: 8  # match your CPU count
+
+# ✅ HTTP compression
+compress: true
+gzip:     true

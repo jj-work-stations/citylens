@@ -1,0 +1,84 @@
+# docker/grafana/provisioning/datasources/datasources.yaml
+
+apiVersion: 1
+
+datasources:
+
+  # ── Tempo ─────────────────────────────────────────────────────
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    url: http://tempo:3200
+    access: proxy
+    isDefault: false
+    jsonData:
+      # Link traces → logs in Loki
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        filterByTraceID: true
+        filterBySpanID: false
+        customQuery: true
+        query: '{container=~"map_api"} |= "${__span.traceId}"'
+
+      # Link traces → metrics in Prometheus
+      tracesToMetrics:
+        datasourceUid: prometheus
+        spanStartTimeShift: "-1m"
+        spanEndTimeShift: "1m"
+        tags:
+          - key: service.name
+            value: service
+          - key: http.method
+            value: method
+        queries:
+          - name: "Request Rate"
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags}[5m]))'
+          - name: "Error Rate"
+            query: 'sum(rate(traces_spanmetrics_calls_total{$$__tags, status_code="STATUS_CODE_ERROR"}[5m]))'
+          - name: "Latency P99"
+            query: 'histogram_quantile(0.99, sum(rate(traces_spanmetrics_latency_bucket{$$__tags}[5m])) by (le))'
+
+      # Link traces → Prometheus metrics (node metrics etc.)
+      serviceMap:
+        datasourceUid: prometheus
+
+      # Enable TraceQL search
+      search:
+        hide: false
+
+      # Node graph (service dependency)
+      nodeGraph:
+        enabled: true
+
+      lokiSearch:
+        datasourceUid: loki
+
+  # ── Loki ──────────────────────────────────────────────────────
+  - name: Loki
+    type: loki
+    uid: loki
+    url: http://loki:3100
+    access: proxy
+    isDefault: true
+    jsonData:
+      # Link logs → traces
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"(\w+)"'
+          url: '$${__value.raw}'
+          datasourceUid: tempo
+          urlDisplayLabel: "View Trace"
+
+  # ── Prometheus ────────────────────────────────────────────────
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    url: http://host.docker.internal:9090
+    access: proxy
+    jsonData:
+      timeInterval: "15s"
+      exemplarTraceIdDestinations:
+        - name: trace_id
+          datasourceUid: tempo

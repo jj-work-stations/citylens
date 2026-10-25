@@ -1,0 +1,120 @@
+# ─────────────────────────────────────────────────────────────────────
+#  Traefik static configuration — API Gateway
+# ─────────────────────────────────────────────────────────────────────
+#  Loaded once at startup. Only infrastructure concerns live here:
+#  entrypoints, providers and observability.
+#
+#  TOPOLOGY — Traefik runs BEHIND the host's nginx:
+#
+#      internet ─▶ nginx (host)  :443  terminates TLS
+#                        │           (wildcard *.kashefteam.org cert)
+#                        ▼  http://127.0.0.1:8090
+#                  Traefik (this)  :80   path-based routing
+#                        │
+#          ┌─────────────┼──────────────┬──────────────┐
+#          ▼             ▼              ▼              ▼
+#       api:8000     martin:3000    service1..4   (future services)
+#
+#  nginx stays the edge, so Traefik does NOT terminate TLS and has no
+#  ACME configuration — the wildcard certificate already covers
+#  gateway.kashefteam.org. It only listens on loopback.
+#
+#  IMPORTANT: Traefik does NOT expand ${VARS} in this file. Values that
+#  change per environment (the public domain) are set in
+#  docker-compose.yml, where Compose *does* expand ${VARS} in labels.
+#
+#  Routing rules (routers, services, middlewares) live in the dynamic
+#  directory and reload on change WITHOUT a restart.
+# ─────────────────────────────────────────────────────────────────────
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# ── Entrypoints ──────────────────────────────────────────────────────
+entryPoints:
+
+  # The only entrypoint that carries traffic. Bound to 127.0.0.1 on the
+  # host (see docker-compose.yml) and reached exclusively through nginx.
+  web:
+    address: ":80"
+    # nginx forwards the real client IP and the original scheme. Traefik
+    # only honours those headers from a trusted peer — here the Docker
+    # bridge gateway, i.e. the host that runs nginx. Without this the
+    # API would log/limit by the gateway IP instead of the real client.
+    forwardedHeaders:
+      trustedIPs:
+        - "10.211.0.1"
+    transport:
+      respondingTimeouts:
+        readTimeout: 60s
+        writeTimeout: 0s      # 0 = unlimited; tiles / long queries
+        idleTimeout: 180s
+
+  # Internal-only :8080 — dashboard, /api, /metrics and /ping.
+  # Published to 127.0.0.1 only, so it is never exposed to the internet.
+  traefik:
+    address: ":8080"
+
+# ── Providers ────────────────────────────────────────────────────────
+providers:
+
+  # Discovers containers on the shared network that opt in with the
+  # label traefik.enable=true. Talks to a socket proxy, never the raw
+  # /var/run/docker.sock (least privilege — the proxy allows read-only
+  # endpoints only).
+  docker:
+    endpoint: "tcp://docker-socket-proxy:2375"
+    exposedByDefault: false
+    network: map_net
+    watch: true
+
+  # File provider: middlewares and external (non-container) backends.
+  # Hot-reloaded, no restart required.
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# ── Observability ────────────────────────────────────────────────────
+api:
+  dashboard: true
+  # The API/dashboard is bound to the internal `traefik` entrypoint
+  # (127.0.0.1:8080) only, so "insecure" is not reachable publicly.
+  insecure: true
+
+ping:
+  entryPoint: traefik
+
+# Scraped by Prometheus at 127.0.0.1:8080/metrics (or traefik:8080
+# from another Compose stack on the same network).
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addRoutersLabels: true
+    addServicesLabels: true
+    buckets:
+      - 0.05
+      - 0.1
+      - 0.3
+      - 1.2
+      - 5.0
+
+# Distributed tracing — Traefik propagates trace context to the API and
+# reports its own spans, so a request can be followed end-to-end in Tempo.
+tracing:
+  otlp:
+    grpc:
+      endpoint: tempo:4317
+      insecure: true
+
+# ── Logging ──────────────────────────────────────────────────────────
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  format: json
+  # Uncomment to log only errors (quieter, but hides traffic history):
+  # filters:
+  #   statusCodes:
+  #     - "400-599"

@@ -1,0 +1,94 @@
+# docker/tempo/tempo.yaml
+
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: info
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+    pool:
+      max_workers: 100
+      queue_depth: 10000
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  max_block_duration: 5m
+  trace_idle_period: 10s
+  max_block_bytes: 1000000
+
+compactor:
+  compaction:
+    block_retention: 168h
+    compacted_block_retention: 1h
+
+querier:
+  max_concurrent_queries: 20
+
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+      cluster: map-api
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://host.docker.internal:9090/api/v1/write
+        send_exemplars: true
+  # Tempo 2.8.x: `span_metrics` / `service_graphs` live under `processor:`
+  # (singular). Placing them directly under metrics_generator makes the
+  # config fail to parse — "field span_metrics not found in type
+  # generator.Config" — and the container crash-loops, which also takes the
+  # Prometheus `tempo` job down (nothing ever listens on :3200).
+  # The processors themselves are switched on in overrides below.
+  processor:
+    span_metrics:
+      # These dimensions are emitted as Prometheus labels on traces_spanmetrics_*.
+      # Dots in attribute names are converted to underscores:
+      #   http.method       -> http_method
+      #   http.route        -> http_route
+      #   http.status_code  -> http_status_code
+      # They power per-route / per-method / per-status panels in Grafana.
+      dimensions:
+        - http.method
+        - http.route
+        - http.status_code
+        - db.system
+      # 2.8.2 takes a flat `histogram_buckets` list; the nested
+      # `histogram: {buckets: ...}` form is not a field of spanmetrics.Config.
+      histogram_buckets: [0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30]
+
+    service_graphs:
+      dimensions:
+        - http.method
+        - http.status_code
+        - http.route
+
+
+overrides:
+  defaults:
+    metrics_generator:
+      processors:
+        - service-graphs
+        - span-metrics
+      generate_native_histograms: classic
+    ingestion:
+      rate_limit_bytes: 15000000
+      burst_size_bytes: 20000000
+      max_traces_per_user: 100000
+    read:
+      max_bytes_per_tag_values_query: 5000000
