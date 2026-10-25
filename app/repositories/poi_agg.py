@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.poi_agg import PoiAgg
+from app.schemas.poi_agg import PoiAggRecordResponse
 
 
 class PoiAggRepository:
@@ -17,9 +18,12 @@ class PoiAggRepository:
         city: Optional[str] = None,
         hex_id: Optional[str] = None,
         slug: Optional[str] = None,
-    ) -> List[PoiAgg]:
-        stmt = select(PoiAgg).distinct(
-            PoiAgg.hex_id, PoiAgg.city, PoiAgg.slug, PoiAgg.count
+    ) -> List[PoiAggRecordResponse]:
+        stmt = select(
+            PoiAgg.hex_id,
+            func.min(PoiAgg.city).label("city"),
+            func.min(PoiAgg.slug).label("slug"),
+            func.max(PoiAgg.count).label("count"),
         )
 
         if city is not None:
@@ -29,6 +33,6 @@ class PoiAggRepository:
         if slug is not None:
             stmt = stmt.where(PoiAgg.slug == slug)
 
-        stmt = stmt.order_by(PoiAgg.hex_id, PoiAgg.city, PoiAgg.slug, PoiAgg.count)
+        stmt = stmt.group_by(PoiAgg.hex_id).order_by(PoiAgg.hex_id)
         res = await self.db.execute(stmt)
-        return list(res.scalars().all())
+        return [PoiAggRecordResponse(**row._asdict()) for row in res.all()]
