@@ -5,7 +5,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.poi_agg import PoiAgg
-from app.schemas.poi_agg import PoiAggRecordResponse
 
 
 class PoiAggRepository:
@@ -18,13 +17,11 @@ class PoiAggRepository:
         city: Optional[str] = None,
         hex_id: Optional[str] = None,
         slug: Optional[str] = None,
-    ) -> List[PoiAggRecordResponse]:
-        stmt = select(
-            PoiAgg.hex_id,
-            func.min(PoiAgg.city).label("city"),
-            func.min(PoiAgg.slug).label("slug"),
-            func.max(PoiAgg.count).label("count"),
-        )
+    ) -> List[PoiAgg]:
+        # poi_agg is already aggregated upstream; just fetch the rows.
+        # No DISTINCT / GROUP BY here — those masked nothing and only
+        # distorted the data (see note below about duplicate causes).
+        stmt = select(PoiAgg)
 
         if city is not None:
             stmt = stmt.where(func.lower(PoiAgg.city) == city.lower())
@@ -33,6 +30,6 @@ class PoiAggRepository:
         if slug is not None:
             stmt = stmt.where(PoiAgg.slug == slug)
 
-        stmt = stmt.group_by(PoiAgg.hex_id).order_by(PoiAgg.hex_id)
+        stmt = stmt.order_by(PoiAgg.hex_id)
         res = await self.db.execute(stmt)
-        return [PoiAggRecordResponse(**row._asdict()) for row in res.all()]
+        return list(res.scalars().all())
